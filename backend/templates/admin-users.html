@@ -158,6 +158,35 @@
     <script src="/static/js/api.js"></script>
     <script src="/static/js/main.js"></script>
     <script>
+      // Check if user is logged in and has admin/moderator role
+      async function validateAdminAccess() {
+        const token = readToken();
+        if (!token) {
+          window.location.href = "/login?next=/admin/users";
+          return;
+        }
+        
+        try {
+          const payload = await apiGet("/api/auth/me", { auth: true });
+          const user = payload.data || {};
+          const roles = user.roles || [];
+          
+          if (!roles.includes("admin") && !roles.includes("moderator")) {
+            // User is logged in but doesn't have admin/moderator role
+            window.location.href = "/";
+            return;
+          }
+          // User has admin access, page can load normally
+        } catch (err) {
+          // Token is invalid or request failed
+          window.location.href = "/login?next=/admin/users";
+        }
+      }
+      
+      // Run validation immediately
+      validateAdminAccess();
+    </script>
+    <script>
       const usersSearch = document.getElementById("users-search");
       const usersStatus = document.getElementById("users-status");
       const usersList = document.getElementById("users-list");
