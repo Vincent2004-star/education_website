@@ -86,6 +86,7 @@
     </header>
 
     <main>
+      <div id="auth-loading" style="position:fixed; top:0; left:0; width:100%; height:100%; background:white; z-index:1000; display:flex; align-items: center; justify-content: center; font-size:18px; color:var(--accent);">Verifying access...</div>
       <a href="/admin" class="muted" style="display:inline-block; margin-bottom:12px;">&larr; Back to Admin Home</a>
       <h1 style="margin: 0 0 12px; font-size: 40px; color: var(--accent); font-weight: 800;">Bookstore Admin</h1>
       <p class="muted" style="margin: 0 0 28px;">Manage books and upload store assets.</p>
@@ -162,6 +163,13 @@
 
           <div style="padding:24px; background:var(--bg0); border-radius:16px;">
             <h3 style="margin:0 0 16px; font-size:18px; color:var(--accent);">Step 3) Upload Assets</h3>
+            <div style="margin-bottom:16px; display:flex; flex-direction:column; gap:8px;">
+              <label for="upload-book-id">Select book for uploads</label>
+              <select id="upload-book-id" style="width:100%; background:white; padding:12px; border-radius:12px; border:1px solid var(--border);">
+                <option value="">Choose an existing book or create one in Step 2</option>
+              </select>
+              <div class="helper-text muted" style="margin-top:0; font-size:14px;">Pick an existing book here to upload cover and ebook assets, or create a new book in Step 2 and it will be selected automatically.</div>
+            </div>
             <div style="margin-bottom:16px; padding:12px; background:white; border-radius:8px; border:1px solid var(--border); font-size:14px;">
               Current book: <strong id="current-book-id" style="color:var(--accent);">-</strong>
             </div>
@@ -269,6 +277,132 @@
     <script src="/static/js/api.js"></script>
     <script src="/static/js/main.js"></script>
     <script>
+      // Check if user is logged in and has admin/moderator role
+      async function validateAdminAccess() {
+        const token = readToken();
+        if (!token) {
+          window.location.href = "/login?next=/admin/bookstore";
+          return;
+        }
+        
+        try {
+          const payload = await apiGet("/api/auth/me", { auth: true });
+          const user = payload.data || {};
+          
+          if (!user.roles || (!user.roles.includes("admin") && !user.roles.includes("moderator"))) {
+            // User is logged in but doesn't have admin/moderator role
+            window.location.href = "/";
+            return;
+          }
+          // User has admin access, page can load normally
+          initializePage();
+        } catch (err) {
+          // Token is invalid or request failed
+          window.location.href = "/login?next=/admin/bookstore";
+        }
+      }
+      
+      // Run validation immediately
+      validateAdminAccess();
+
+      // Separate function to initialize the page after validation
+      async function initializePage() {
+        document.getElementById("auth-loading").style.display = "none";
+        refreshUploadButtons();
+        const workflowBtn = $("toggle-book-workflow-btn");
+        const workflowPanel = $("book-workflow-panel");
+        if (workflowBtn && workflowPanel) {
+          workflowBtn.addEventListener("click", () => {
+            const isOpen = workflowPanel.style.display === "flex";
+            workflowPanel.style.display = isOpen ? "none" : "flex";
+            workflowBtn.textContent = isOpen ? "Create New Book Workflow" : "Hide Create Workflow";
+          });
+        }
+        await Promise.all([loadCategories(), loadBooks()]);
+
+        // Set up event listeners
+        setupEventListeners();
+      }
+
+      function setupEventListeners() {
+        $("book-edit-cancel-btn").addEventListener("click", closeBookEditModal);
+        $("book-edit-modal").addEventListener("click", (e) => {
+          if (e.target.id === "book-edit-modal") closeBookEditModal();
+        });
+        $("book-edit-apply-btn").addEventListener("click", () => {
+          if (!selectedBookId) return;
+          updateBookFromModal(selectedBookId, $("book-edit-apply-btn"))
+            .then(async () => {
+              window.showToast("Book updated successfully.", "good");
+              setStatus("book-result", `Book ${selectedBookId} updated.`, "good");
+              if (String(currentBookId) === String(selectedBookId)) {
+                currentBookTitle = $("book-edit-title").value.trim() || currentBookTitle;
+                renderCurrentBookLabel();
+              }
+              closeBookEditModal();
+              await Promise.all([loadCategories(), loadBooks()]);
+            })
+            .catch((e) => {
+              window.showToast(e.message || "Failed to update book.", "bad");
+            });
+        });
+        $("book-edit-delete-btn").addEventListener("click", () => {
+          if (!selectedBookId) return;
+          const confirmed = window.confirm("Delete this book? This action cannot be undone.");
+          if (!confirmed) return;
+
+          deleteBookFromModal(selectedBookId, $("book-edit-delete-btn"))
+            .then(async () => {
+              const deletedBookId = selectedBookId;
+              if (String(currentBookId) === String(deletedBookId)) {
+                currentBookId = null;
+                currentBookTitle = "";
+                renderCurrentBookLabel();
+                refreshUploadButtons();
+              }
+              window.showToast("Book deleted successfully.", "good");
+              setStatus("book-result", `Book ${deletedBookId} deleted.`, "good");
+              closeBookEditModal();
+              await Promise.all([loadCategories(), loadBooks()]);
+            })
+            .catch((e) => {
+              window.showToast(e.message || "Failed to delete book.", "bad");
+            });
+        });
+        $("book-category-existing-id").addEventListener("change", () => applyBookCategoryFromDropdown());
+        $("book-category-name").addEventListener("input", (e) => {
+          const typed = e.target.value.trim();
+          if (!typed) {
+            selectedCategoryName = "";
+            return;
+          }
+          $("book-category-existing-id").value = "";
+          selectedCategoryId = null;
+          selectedCategoryName = typed;
+        });
+        // Add the remaining event listeners from the second script
+        $("books-table-body").addEventListener("click", (e) => {
+          const btn = e.target.closest(".edit-book-row-btn");
+          if (btn) {
+            e.stopPropagation();
+            openBookEditModal(btn.dataset.bookId);
+            return;
+          }
+          const row = e.target.closest("tr.data-row");
+          if (!row) return;
+          const bookId = row.dataset.bookId;
+          expandedBookId = String(expandedBookId) === String(bookId) ? null : bookId;
+          renderBooks(booksCache);
+        });
+        const uploadBookDropdown = document.getElementById("upload-book-id");
+        if (uploadBookDropdown) {
+          uploadBookDropdown.addEventListener("change", (e) => {
+            setCurrentUploadBook(e.target.value);
+          });
+        }
+      }
+    </script>
+    <script>
       const $ = (id) => document.getElementById(id);
       const getToken = () => window.localStorage.getItem("access_token");
       let currentBookId = null;
@@ -287,6 +421,17 @@
         $("upload-assets-btn").disabled = disabled;
       }
 
+      function setCurrentUploadBook(bookId) {
+        currentBookId = bookId ? Number(bookId) : null;
+        if (currentBookId) {
+          currentBookTitle = booksCache.find((b) => String(b.id) === String(currentBookId))?.title || currentBookTitle;
+        } else {
+          currentBookTitle = "";
+        }
+        renderCurrentBookLabel();
+        refreshUploadButtons();
+      }
+
       function renderCurrentBookLabel() {
         const label = $("current-book-id");
         if (!label) return;
@@ -296,7 +441,7 @@
         }
         const fallbackTitle = booksCache.find((b) => String(b.id) === String(currentBookId))?.title || "";
         const title = (currentBookTitle || fallbackTitle || "Untitled").trim();
-        label.textContent = `${title} (ID: ${currentBookId})`;
+        label.textContent = `B${currentBookId} - ${title}`;
       }
 
       function setStatus(id, message, type = "info") {
@@ -355,15 +500,16 @@
       }
 
       async function loadCategories() {
-        const res = await apiGet("/api/books/categories", { auth: false });
-        const categories = res.data || [];
-        categoriesCache = categories;
-        const stepOneSel = $("book-category-existing-id");
-        const modalSel = $("book-edit-category-id");
-        const stepOnePreviousSelection = stepOneSel ? stepOneSel.value : "";
-        if (stepOneSel) stepOneSel.innerHTML = `<option value="">Choose ...</option>`;
-        if (modalSel) modalSel.innerHTML = `<option value="">Choose ...</option>`;
-        categories.forEach((c) => {
+        try {
+          const res = await apiGet("/api/books/categories", { auth: false });
+          const categories = res.data || [];
+          categoriesCache = categories;
+          const stepOneSel = $("book-category-existing-id");
+          const modalSel = $("book-edit-category-id");
+          const stepOnePreviousSelection = stepOneSel ? stepOneSel.value : "";
+          if (stepOneSel) stepOneSel.innerHTML = `<option value="">Choose ...</option>`;
+          if (modalSel) modalSel.innerHTML = `<option value="">Choose ...</option>`;
+          categories.forEach((c) => {
           if (stepOneSel) {
             const stepOneOpt = document.createElement("option");
             stepOneOpt.value = String(c.id);
@@ -396,11 +542,40 @@
           selectedCategoryName = "";
         }
         preferredCategoryId = null;
+        } catch (err) {
+          console.error("Failed to load categories:", err);
+          // Show error in category dropdowns
+          const stepOneSel = $("book-category-existing-id");
+          const modalSel = $("book-edit-category-id");
+          if (stepOneSel) stepOneSel.innerHTML = `<option value="">Error loading categories</option>`;
+          if (modalSel) modalSel.innerHTML = `<option value="">Error loading categories</option>`;
+        }
       }
 
       async function loadBooks() {
-        const res = await apiGet("/api/books", { auth: false });
-        renderBooks(res.data || []);
+        try {
+          const res = await apiGet("/api/books", { auth: false });
+          const books = res.data || [];
+          renderBooks(books);
+          populateUploadBookDropdown(books);
+        } catch (err) {
+          console.error("Failed to load books:", err);
+          const tbody = $("books-table-body");
+          if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="7" class="bad">Failed to load books: ${err.message}</td></tr>`;
+          }
+        }
+      }
+
+      function categoryLabel(book) {
+        if (!book) return "Unknown";
+        if (book.category_name) return book.category_name;
+        if (book.category) return book.category;
+        if (book.category_id != null) {
+          const category = categoriesCache.find((c) => String(c.id) === String(book.category_id));
+          return category?.name || "Unknown";
+        }
+        return "Unknown";
       }
 
       function populateUploadBookDropdown(books) {
@@ -545,11 +720,9 @@
               category_id: selectedCategoryId ? Number(selectedCategoryId) : null,
               category_name: selectedCategoryId ? null : (selectedCategoryName.trim() || null)
             }, { auth: true });
-            currentBookId = payload.data.book_id;
             currentBookTitle = $("book-title").value.trim();
+            setCurrentUploadBook(payload.data.book_id);
             if (selectedCategoryId) preferredCategoryId = selectedCategoryId;
-            renderCurrentBookLabel();
-            refreshUploadButtons();
             $("image-upload-badge").style.display = "none";
             $("ebook-upload-badge").style.display = "none";
             setStatus("book-result", `Created book id: ${currentBookId}. Book is now selected for uploads.`, "good");
@@ -628,88 +801,7 @@
         const file = e.target.files?.[0];
         $("ebook-file-name").textContent = file ? `Selected: ${file.name}` : "No file selected.";
       });
-      $("books-table-body").addEventListener("click", (e) => {
-        const btn = e.target.closest(".edit-book-row-btn");
-        if (btn) {
-          e.stopPropagation();
-          openBookEditModal(btn.dataset.bookId);
-          return;
-        }
-        const row = e.target.closest("tr.data-row");
-        if (!row) return;
-        const bookId = row.dataset.bookId;
-        expandedBookId = String(expandedBookId) === String(bookId) ? null : bookId;
-        renderBooks(booksCache);
-      });
-
-      document.addEventListener("DOMContentLoaded", async () => {
-        refreshUploadButtons();
-        const workflowBtn = $("toggle-book-workflow-btn");
-        const workflowPanel = $("book-workflow-panel");
-        if (workflowBtn && workflowPanel) {
-          workflowBtn.addEventListener("click", () => {
-            const isOpen = workflowPanel.style.display === "flex";
-            workflowPanel.style.display = isOpen ? "none" : "flex";
-            workflowBtn.textContent = isOpen ? "Create New Book Workflow" : "Hide Create Workflow";
-          });
-        }
-        await Promise.all([loadCategories(), loadBooks()]);
-      });
-      $("book-edit-cancel-btn").addEventListener("click", closeBookEditModal);
-      $("book-edit-modal").addEventListener("click", (e) => {
-        if (e.target.id === "book-edit-modal") closeBookEditModal();
-      });
-      $("book-edit-apply-btn").addEventListener("click", () => {
-        if (!selectedBookId) return;
-        updateBookFromModal(selectedBookId, $("book-edit-apply-btn"))
-          .then(async () => {
-            window.showToast("Book updated successfully.", "good");
-            setStatus("book-result", `Book ${selectedBookId} updated.`, "good");
-            if (String(currentBookId) === String(selectedBookId)) {
-              currentBookTitle = $("book-edit-title").value.trim() || currentBookTitle;
-              renderCurrentBookLabel();
-            }
-            closeBookEditModal();
-            await Promise.all([loadCategories(), loadBooks()]);
-          })
-          .catch((e) => {
-            window.showToast(e.message || "Failed to update book.", "bad");
-          });
-      });
-      $("book-edit-delete-btn").addEventListener("click", () => {
-        if (!selectedBookId) return;
-        const confirmed = window.confirm("Delete this book? This action cannot be undone.");
-        if (!confirmed) return;
-
-        deleteBookFromModal(selectedBookId, $("book-edit-delete-btn"))
-          .then(async () => {
-            const deletedBookId = selectedBookId;
-            if (String(currentBookId) === String(deletedBookId)) {
-              currentBookId = null;
-              currentBookTitle = "";
-              renderCurrentBookLabel();
-              refreshUploadButtons();
-            }
-            window.showToast("Book deleted successfully.", "good");
-            setStatus("book-result", `Book ${deletedBookId} deleted.`, "good");
-            closeBookEditModal();
-            await Promise.all([loadCategories(), loadBooks()]);
-          })
-          .catch((e) => {
-            window.showToast(e.message || "Failed to delete book.", "bad");
-          });
-      });
-      $("book-category-existing-id").addEventListener("change", () => applyBookCategoryFromDropdown());
-      $("book-category-name").addEventListener("input", (e) => {
-        const typed = e.target.value.trim();
-        if (!typed) {
-          selectedCategoryName = "";
-          return;
-        }
-        $("book-category-existing-id").value = "";
-        selectedCategoryId = null;
-        selectedCategoryName = typed;
-      });
+      // Event listeners moved to setupEventListeners() in first script tag
     </script>
   </body>
 </html>
