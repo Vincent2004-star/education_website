@@ -43,7 +43,10 @@
           </div>
           <div style="margin-bottom: 32px;">
             <label for="password">Password</label>
-            <input id="password" name="password" type="password" minlength="8" autocomplete="new-password" required placeholder="At least 8 characters" />
+            <div style="display:flex; align-items:center; gap:10px;">
+              <input id="password" name="password" type="password" minlength="8" autocomplete="new-password" required placeholder="At least 8 characters" style="flex:1;" />
+              <button type="button" id="toggle-password-visibility-btn" class="btn outline" style="padding: 12px 14px; white-space: nowrap;">Show</button>
+            </div>
           </div>
           <button class="btn" type="submit" style="width: 100%; padding: 14px; font-size: 16px;">Create account</button>
         </form>
@@ -121,6 +124,15 @@
     <script>
       const form = document.getElementById("register-form");
       const errorBox = document.getElementById("error-box");
+      const togglePasswordBtn = document.getElementById("toggle-password-visibility-btn");
+      const passwordInput = document.getElementById("password");
+      if (togglePasswordBtn && passwordInput) {
+        togglePasswordBtn.addEventListener("click", () => {
+          const isHidden = passwordInput.type === "password";
+          passwordInput.type = isHidden ? "text" : "password";
+          togglePasswordBtn.textContent = isHidden ? "Hide" : "Show";
+        });
+      }
 
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
