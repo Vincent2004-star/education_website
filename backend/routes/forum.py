@@ -2,10 +2,18 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 
 from ..extensions import db
-from ..models import ForumTopic, ForumPost, ForumReport
+from ..models import ForumTopic, ForumPost, ForumReport, User
 
 
 forum_bp = Blueprint("forum", __name__)
+ALLOWED_TOPIC_CATEGORIES = {
+    "General",
+    "Philosophy",
+    "Technology",
+    "Science",
+    "Arts",
+    "Career",
+}
 
 
 def _json_error(message: str, code: str = "bad_request", status_code: int = 400):
@@ -32,10 +40,15 @@ def _require_roles(allowed):
 
 
 def _topic_to_dict(t: ForumTopic):
+    user = User.query.get(t.created_by)
+    display_name = (user.display_name or "").strip() if user else ""
+    fallback_name = (user.email.split("@")[0] if user and user.email else f"User {t.created_by}")
     return {
         "id": t.id,
         "title": t.title,
+        "category": t.category or "General",
         "created_by": t.created_by,
+        "created_by_display": display_name or fallback_name,
         "created_at": t.created_at.isoformat(),
         "is_locked": t.is_locked,
         "status": t.status,
@@ -43,11 +56,15 @@ def _topic_to_dict(t: ForumTopic):
 
 
 def _post_to_dict(p: ForumPost):
+    user = User.query.get(p.created_by)
+    display_name = (user.display_name or "").strip() if user else ""
+    fallback_name = (user.email.split("@")[0] if user and user.email else f"User {p.created_by}")
     return {
         "id": p.id,
         "topic_id": p.topic_id,
         "content": p.content,
         "created_by": p.created_by,
+        "created_by_display": display_name or fallback_name,
         "created_at": p.created_at.isoformat(),
         "status": p.status,
     }
@@ -56,10 +73,13 @@ def _post_to_dict(p: ForumPost):
 @forum_bp.get("/forum/topics")
 def list_topics():
     search = request.args.get("search", "").strip()
+    category = request.args.get("category", "").strip()
     q = ForumTopic.query.filter(ForumTopic.status != "hidden")
     if search:
         # Basic search for project scaffold
         q = q.filter(ForumTopic.title.ilike(f"%{search}%"))
+    if category and category.lower() != "all":
+        q = q.filter(ForumTopic.category.ilike(category))
     topics = q.order_by(ForumTopic.created_at.desc()).all()
     return jsonify({"data": [_topic_to_dict(t) for t in topics], "error": None})
 
@@ -70,11 +90,14 @@ def create_topic():
     user_id = int(get_jwt_identity())
     payload = request.get_json(silent=True) or {}
     title = (payload.get("title") or "").strip()
+    category = (payload.get("category") or "General").strip().title()
 
     if not title or len(title) < 4 or len(title) > 220:
         return _json_error("Topic title must be between 4 and 220 chars", code="invalid_title")
+    if category not in ALLOWED_TOPIC_CATEGORIES:
+        return _json_error("Invalid topic category", code="invalid_category")
 
-    topic = ForumTopic(title=title, created_by=user_id, is_locked=False, status="active")
+    topic = ForumTopic(title=title, category=category, created_by=user_id, is_locked=False, status="active")
     db.session.add(topic)
     db.session.commit()
     return jsonify({"data": {"topic_id": topic.id}, "error": None}), 201

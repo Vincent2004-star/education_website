@@ -28,6 +28,8 @@
             Sign in to save resources and access your ebooks.
           </p>
         </div>
+
+        <div class="status" id="info-box" style="display:none; margin-bottom: 24px;"></div>
         
         <div class="status bad" id="error-box" style="display:none; margin-bottom: 24px;"></div>
         
@@ -66,7 +68,6 @@
           <div style="display: flex; flex-direction: column; gap: 16px;">
             <a href="/courses" style="color: var(--muted); font-size: 14px; text-decoration: none;">Course Catalog</a>
             <a href="/bookstore" style="color: var(--muted); font-size: 14px; text-decoration: none;">Bookstore</a>
-            <a href="/portal" aria-label="Bookmarks">Bookmarks</a>
           <a href="/forum" style="color: var(--muted); font-size: 14px; text-decoration: none;">Discourse Forum</a>
           </div>
         </div>
@@ -100,15 +101,6 @@
     <script>
       const form = document.getElementById("login-form");
       const errorBox = document.getElementById("error-box");
-      const togglePasswordBtn = document.getElementById("toggle-password-visibility-btn");
-      const passwordInput = document.getElementById("password");
-      if (togglePasswordBtn && passwordInput) {
-        togglePasswordBtn.addEventListener("click", () => {
-          const isHidden = passwordInput.type === "password";
-          passwordInput.type = isHidden ? "text" : "password";
-          togglePasswordBtn.textContent = isHidden ? "Hide" : "Show";
-        });
-      }
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
         errorBox.style.display = "none";
@@ -117,6 +109,10 @@
           const password = document.getElementById("password").value;
           const payload = await apiPost("/api/auth/login", { email, password }, { auth: false });
           window.localStorage.setItem("access_token", payload.data.access_token);
+          if (nextPath && nextPath.startsWith("/")) {
+            window.location.href = nextPath;
+            return;
+          }
           window.location.href = "/";
         } catch (err) {
           errorBox.style.display = "block";
