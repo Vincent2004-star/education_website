@@ -157,6 +157,13 @@
 
           <div style="padding:24px; background:var(--bg0); border-radius:16px;">
             <h3 style="margin:0 0 16px; font-size:18px; color:var(--accent);">Step 3) Upload Assets</h3>
+            <p class="helper-text muted">Select a book to upload or re-upload assets for.</p>
+            <div style="margin-bottom:16px;">
+              <label for="upload-book-id">Book ID</label>
+              <select id="upload-book-id" style="background:white;">
+                <option value="">(select a book)</option>
+              </select>
+            </div>
             <div style="margin-bottom:16px; padding:12px; background:white; border-radius:8px; border:1px solid var(--border); font-size:14px;">
               Current book id: <strong id="current-book-id" style="color:var(--accent);">-</strong>
             </div>
@@ -345,10 +352,30 @@
         renderBooks(res.data || []);
       }
 
+      function populateUploadBookDropdown(books) {
+        const dropdown = $("upload-book-id");
+        if (!dropdown) return;
+        const previousSelection = dropdown.value;
+        dropdown.innerHTML = `<option value="">(select a book)</option>`;
+        books.forEach((b) => {
+          const option = document.createElement("option");
+          option.value = String(b.id);
+          option.textContent = `B${b.id} - ${b.title || "Untitled"}`;
+          dropdown.appendChild(option);
+        });
+        // Select currentBookId if it exists, otherwise restore previous selection
+        if (currentBookId && books.some(b => String(b.id) === String(currentBookId))) {
+          dropdown.value = String(currentBookId);
+        } else if (previousSelection && Array.from(dropdown.options).some(o => o.value === previousSelection)) {
+          dropdown.value = previousSelection;
+        }
+      }
+
       function renderBooks(books) {
         const tbody = $("books-table-body");
         if (!tbody) return;
         booksCache = books;
+        populateUploadBookDropdown(books);
         if (!books.length) {
           tbody.innerHTML = `<tr><td colspan="7" class="muted">No books available yet.</td></tr>`;
           return;
@@ -469,14 +496,14 @@
             refreshUploadButtons();
             $("image-upload-badge").style.display = "none";
             $("ebook-upload-badge").style.display = "none";
-            setStatus("book-result", `Created book id: ${currentBookId}. Now upload cover and PDF.`, "good");
+            setStatus("book-result", `Created book id: ${currentBookId}. Book is now selected for uploads.`, "good");
             window.showToast("Book created successfully.", "good");
             $("book-title").value = "";
             $("book-author").value = "";
             $("book-description").value = "";
             $("book-price").value = "10";
             $("book-stock").value = "5";
-            await loadBooks();
+            await loadBooks(); // This will populate the dropdown and select the new book
           } catch (e2) {
             setStatus("book-result", e2.message || "Failed to create book.", "bad");
             window.showToast(e2.message || "Failed to create book.", "bad");
@@ -489,7 +516,7 @@
         await window.withButtonLoading(e.currentTarget, "Uploading...", async () => {
           try {
             await requireAuthOrThrow();
-            if (!currentBookId) throw new Error("Create a book first.");
+            if (!currentBookId) throw new Error("Select a book first.");
             const file = $("book-image-file").files[0];
             if (!file) throw new Error("Select an image file first.");
             if (!file.type.startsWith("image/")) throw new Error("Cover must be an image file.");
@@ -514,7 +541,7 @@
         await window.withButtonLoading(e.currentTarget, "Uploading...", async () => {
           try {
             await requireAuthOrThrow();
-            if (!currentBookId) throw new Error("Create a book first.");
+            if (!currentBookId) throw new Error("Select a book first.");
             const file = $("ebook-pdf-file").files[0];
             if (!file) throw new Error("Select a PDF file first.");
             if (file.type !== "application/pdf") throw new Error("Ebook must be a PDF file.");
@@ -621,6 +648,20 @@
         $("book-category-existing-id").value = "";
         selectedCategoryId = null;
         selectedCategoryName = typed;
+      });
+      $("upload-book-id").addEventListener("change", (e) => {
+        const selectedId = e.target.value;
+        if (!selectedId) {
+          currentBookId = null;
+          $("current-book-id").textContent = "-";
+          refreshUploadButtons();
+          return;
+        }
+        currentBookId = Number(selectedId);
+        $("current-book-id").textContent = String(currentBookId);
+        refreshUploadButtons();
+        setStatus("upload-result", `Selected book id: ${currentBookId} for asset uploads.`, "good");
+        window.showToast("Book selected for uploads.", "good");
       });
     </script>
   </body>
