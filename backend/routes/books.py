@@ -55,7 +55,7 @@ def _decimal_to_float(x) -> float:
     return float(x)
 
 
-def _book_to_dict(b: Book, category_name: str | None = None, stock_count: int | None = None):
+def _book_to_dict(b: Book, category_name: str | None = None, stock_count: int | None = None, in_cart: bool = False):
     stock = 0 if stock_count is None else int(stock_count)
     return {
         "id": b.id,
@@ -68,6 +68,7 @@ def _book_to_dict(b: Book, category_name: str | None = None, stock_count: int | 
         "image_url": b.image_url,
         "stock_count": stock,
         "sold_out": stock <= 0,
+        "in_cart": in_cart,
     }
 
 
@@ -143,6 +144,7 @@ def list_books():
                     b,
                     categories.get(b.category_id),
                     max(0, int(stock_map.get(b.id, 0)) - int(cart_qty_map.get(b.id, 0))),
+                    b.id in cart_qty_map,
                 )
                 for b in books
             ],
@@ -230,22 +232,20 @@ def add_to_cart():
 
     cart = _get_or_create_active_cart(user_id)
     existing = CartItem.query.filter_by(cart_id=cart.id, book_id=book_id).first()
-    current_qty = existing.quantity if existing else 0
-    requested_total = current_qty + quantity
-    if requested_total > inv.stock_count:
-        return _json_error("Requested quantity exceeds available stock", code="insufficient_stock", status_code=409)
+    
+    # Each book can only be added once to the cart
     if existing:
-        existing.quantity = min(99, existing.quantity + quantity)
-    else:
-        existing = CartItem(
-            cart_id=cart.id,
-            book_id=book_id,
-            quantity=quantity,
-            unit_price_snapshot=b.price,
-        )
-        db.session.add(existing)
+        return _json_error("This book is already in your cart", code="already_in_cart", status_code=409)
+    
+    cart_item = CartItem(
+        cart_id=cart.id,
+        book_id=book_id,
+        quantity=1,
+        unit_price_snapshot=b.price,
+    )
+    db.session.add(cart_item)
     db.session.commit()
-    return jsonify({"data": {"added": True, "cart_item_id": existing.id}, "error": None}), 201
+    return jsonify({"data": {"added": True, "cart_item_id": cart_item.id}, "error": None}), 201
 
 
 @books_bp.patch("/cart/items/<int:item_id>")
