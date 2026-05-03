@@ -1,8 +1,7 @@
 import os
-
-from flask import Flask, send_from_directory
+from flask import Flask, send_from_directory, redirect
 from flask_migrate import Migrate
-from sqlalchemy import inspect, text
+from flask_jwt_extended import verify_jwt_in_request, get_jwt
 
 from .config import Config
 from .extensions import db, jwt
@@ -81,19 +80,15 @@ def create_app() -> Flask:
 
     @app.route("/admin", methods=["GET"])
     def admin_page():
+        try:
+            verify_jwt_in_request(optional=False)
+            claims = get_jwt()
+            user_roles = claims.get("roles", [])
+            if not any(r in ["admin", "moderator"] for r in user_roles):
+                return redirect("/")
+        except Exception:
+            return redirect("/login")
         return send_from_directory(app.template_folder, "admin.html")
-
-    @app.route("/admin/courses", methods=["GET"])
-    def admin_courses_page():
-        return send_from_directory(app.template_folder, "admin-courses.html")
-
-    @app.route("/admin/bookstore", methods=["GET"])
-    def admin_bookstore_page():
-        return send_from_directory(app.template_folder, "admin-bookstore.html")
-
-    @app.route("/admin/users", methods=["GET"])
-    def admin_users_page():
-        return send_from_directory(app.template_folder, "admin-users.html")
 
     # Helpful health check.
     @app.route("/health", methods=["GET"])
@@ -104,18 +99,12 @@ def create_app() -> Flask:
         # For early development we create tables automatically.
         # For production / grading you can switch to migrations.
         db.create_all()
-        inspector = inspect(db.engine)
-        topic_columns = {col["name"] for col in inspector.get_columns("forum_topics")}
-        if "category" not in topic_columns:
-            db.session.execute(
-                text("ALTER TABLE forum_topics ADD COLUMN category VARCHAR(80) NOT NULL DEFAULT 'General'")
-            )
-            db.session.commit()
 
     return app
 
 
 if __name__ == "__main__":
+    import os
     port = int(os.getenv("PORT", "5000"))
     create_app().run(host="0.0.0.0", port=port, debug=True)
 
